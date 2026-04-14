@@ -157,7 +157,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   currentPageInfo = await sendToContent(currentTab.id, { action: 'getPageInfo' });
 
-  if (!currentPageInfo?.available) {
+  if (!currentPageInfo?.available || !currentPageInfo.activeDays?.length) {
     showState('not-ready');
     return;
   }
@@ -183,6 +183,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 document.getElementById('btn-calculate').addEventListener('click', async () => {
   const maxPerWeek = parseInt(document.getElementById('max-per-week').value, 10);
   if (!maxPerWeek || maxPerWeek < 1) return;
+  if (!currentPageInfo?.activeDays?.length) return;
   await saveMaxPerWeek(maxPerWeek);
 
   const { available, activeDays } = currentPageInfo;
