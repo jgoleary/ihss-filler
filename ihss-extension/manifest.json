@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "IHSS Timesheet Filler",
+  "version": "1.0.0",
+  "description": "Auto-fills IHSS provider timesheets",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://etimesheets.ihss.ca.gov/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://etimesheets.ihss.ca.gov/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
