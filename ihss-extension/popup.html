@@ -59,10 +59,10 @@
     <p><strong>etimesheets.ihss.ca.gov/provider-ts-details</strong></p>
   </div>
 
-  <!-- State: not ready (page still loading) -->
+  <!-- State: not ready (page still loading or element mismatch) -->
   <div id="state-not-ready">
     <h2>IHSS Timesheet Filler</h2>
-    <p>The page is still loading. Wait a moment, reload the page, and try again.</p>
+    <p id="not-ready-detail">The page is still loading. Wait a moment, reload the page, and try again.</p>
     <p><em>If the tab was open before the extension was installed, reload it once.</em></p>
   </div>
 
@@ -70,10 +70,14 @@
   <div id="state-ready">
     <h2>IHSS Timesheet Filler</h2>
     <p id="ready-period"></p>
-    <p id="ready-available"></p>
     <p id="ready-days"></p>
-    <label for="max-per-week">Weekly hour cap</label>
-    <input type="number" id="max-per-week" min="1" max="168" value="40">
+    <label>Max monthly hours</label>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="number" id="max-monthly-h" min="0" max="744" step="1" value="160" style="width:64px;">
+      <span>h</span>
+      <input type="number" id="max-monthly-m" min="0" max="59" step="1" value="0" style="width:56px;">
+      <span>m</span>
+    </div>
     <button id="btn-calculate">Calculate schedule</button>
   </div>
 
@@ -88,7 +92,7 @@
       </thead>
       <tbody id="preview-table-body"></tbody>
     </table>
-    <button id="btn-fill">Fill form &amp; save workweeks</button>
+    <button id="btn-fill">Fill form</button>
     <button id="btn-back" class="secondary">Back</button>
   </div>
 
@@ -97,8 +101,7 @@
     <h2>Done!</h2>
     <div class="success" id="done-message"></div>
     <p style="margin-top:12px;">
-      Review the filled timesheet, then click <strong>Submit Timesheet</strong>
-      on the page to finalize.
+      Review the filled hours, then save each workweek and click <strong>Submit Timesheet</strong> on the page.
     </p>
   </div>
 

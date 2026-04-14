@@ -1,20 +1,7 @@
 // Popup script — scheduling algorithm + UI state machine
 'use strict';
 
-// ── Pure scheduling functions (also exported for Node.js unit tests) ─────────
-
-/**
- * Determine how many minutes to schedule in the current pay period.
- * First half uses ceil(total/2) so any odd minute goes to the first period.
- * Second half uses the full available total.
- *
- * @param {number} totalMinutes  Full monthly authorization in minutes
- * @param {boolean} isFirstHalf  Whether the current period is days 1–15
- * @returns {number}
- */
-function computePeriodBudget(totalMinutes, isFirstHalf) {
-  return isFirstHalf ? Math.ceil(totalMinutes / 2) : totalMinutes;
-}
+// ── Pure scheduling functions (also exported for Node.js unit tests) ──────────
 
 /**
  * Auto-detect pay period from active day date labels.
@@ -25,7 +12,6 @@ function computePeriodBudget(totalMinutes, isFirstHalf) {
  * @returns {boolean}
  */
 function detectPayPeriod(activeDays) {
-  if (activeDays.length === 0) throw new Error('detectPayPeriod: no active days');
   const dayNums = activeDays.map(d => {
     const m = d.dateText.match(/(\d+),\s*\d{4}/);
     return m ? parseInt(m[1], 10) : 0;
@@ -34,19 +20,21 @@ function detectPayPeriod(activeDays) {
 }
 
 /**
- * Distribute periodBudget minutes across activeDays, respecting maxPerWeekMinutes.
+ * Distribute periodBudget minutes across activeDays, respecting maxWeekMinutes.
  *
  * Behavior:
  * - Greedy by week: earlier weeks fill to cap before later weeks receive anything
- * - Within each week: whole hours distributed as evenly as possible; first days
- *   receive any extra whole hour; the last active day carries the minute remainder
+ * - Within each week: every day gets the same whole number of hours (0 minutes)
+ * - The very last active day of the period carries all remaining minutes from
+ *   floor-division remainders across all weeks — only one day ever has a
+ *   fractional hour
  *
  * @param {Array<{week:number, dayIdx:number, dateText:string, hoursId:string, minutesId:string}>} activeDays
- * @param {number} periodBudget        Total minutes to schedule this period
- * @param {number} maxPerWeekMinutes   Weekly cap in minutes
+ * @param {number} periodBudget     Total minutes to schedule this period
+ * @param {number} maxWeekMinutes   Weekly cap in minutes
  * @returns {Array<{week, dayIdx, dateText, hoursId, minutesId, hours, minutes}>}
  */
-function distribute(activeDays, periodBudget, maxPerWeekMinutes) {
+function distribute(activeDays, periodBudget, maxWeekMinutes) {
   const weekMap = new Map();
   for (const day of activeDays) {
     if (!weekMap.has(day.week)) weekMap.set(day.week, []);
@@ -57,32 +45,38 @@ function distribute(activeDays, periodBudget, maxPerWeekMinutes) {
   }
   const weekKeys = Array.from(weekMap.keys()).sort((a, b) => a - b);
 
-  let remaining = periodBudget;
-  const schedule = [];
+  let remaining    = periodBudget;
+  let deferredMins = 0; // sub-hour minute remainders, collected across all weeks
+  const schedule   = [];
 
   for (const weekKey of weekKeys) {
-    const days = weekMap.get(weekKey);
-    const weekBudget   = Math.min(remaining, maxPerWeekMinutes);
-    remaining         -= weekBudget;
-    const weekHours    = Math.floor(weekBudget / 60);
-    const weekMins     = weekBudget % 60;
-    const hoursPerDay  = Math.floor(weekHours / days.length);
-    const extraHours   = weekHours % days.length;
+    const days       = weekMap.get(weekKey);
+    const weekBudget = Math.min(remaining, maxWeekMinutes);
+    remaining       -= weekBudget;
+
+    const weekHours  = Math.floor(weekBudget / 60);
+    deferredMins    += weekBudget % 60; // fractional minutes deferred to last day
+
+    const hoursPerDay = Math.floor(weekHours / days.length);
+    const extraHours  = weekHours % days.length; // distribute to first days
 
     days.forEach((day, i) => {
-      schedule.push({
-        ...day,
-        hours:   hoursPerDay + (i < extraHours ? 1 : 0),
-        minutes: i === days.length - 1 ? weekMins : 0,
-      });
+      schedule.push({ ...day, hours: hoursPerDay + (i < extraHours ? 1 : 0), minutes: 0 });
     });
+  }
+
+  // Sub-hour minutes accumulated across all weeks go to the last active day
+  if (schedule.length > 0) {
+    const last = schedule[schedule.length - 1];
+    last.hours   += Math.floor(deferredMins / 60);
+    last.minutes  = deferredMins % 60;
   }
 
   return schedule;
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { computePeriodBudget, detectPayPeriod, distribute };
+  module.exports = { detectPayPeriod, distribute };
 }
 
 // ── Browser UI (not executed in Node.js) ─────────────────────────────────────
@@ -109,14 +103,14 @@ function fmtMins(totalMins) {
 
 // ── Storage ──────────────────────────────────────────────────────────────────
 
-function loadMaxPerWeek() {
+function loadMaxMonthlyMins() {
   return new Promise(resolve => {
-    chrome.storage.local.get('maxPerWeek', ({ maxPerWeek }) => resolve(maxPerWeek ?? 40));
+    chrome.storage.local.get('maxMonthlyMins', ({ maxMonthlyMins }) => resolve(maxMonthlyMins ?? 9600)); // default 160h
   });
 }
 
-function saveMaxPerWeek(value) {
-  return new Promise(resolve => chrome.storage.local.set({ maxPerWeek: value }, resolve));
+function saveMaxMonthlyMins(totalMins) {
+  return new Promise(resolve => chrome.storage.local.set({ maxMonthlyMins: totalMins }, resolve));
 }
 
 // ── Messaging ────────────────────────────────────────────────────────────────
@@ -135,8 +129,6 @@ function sendToContent(tabId, msg) {
   });
 }
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
 // ── State ────────────────────────────────────────────────────────────────────
 
 let currentTab      = null;
@@ -153,25 +145,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  document.getElementById('max-per-week').value = await loadMaxPerWeek();
+  const savedMins = await loadMaxMonthlyMins();
+  document.getElementById('max-monthly-h').value = Math.floor(savedMins / 60);
+  document.getElementById('max-monthly-m').value = savedMins % 60;
 
   currentPageInfo = await sendToContent(currentTab.id, { action: 'getPageInfo' });
 
-  if (!currentPageInfo?.available || !currentPageInfo.activeDays?.length) {
+  if (!currentPageInfo || currentPageInfo.status !== 'ok') {
+    document.getElementById('not-ready-detail').textContent =
+      currentPageInfo?.reason ?? 'Content script did not respond. Reload the IHSS tab and try again.';
     showState('not-ready');
     return;
   }
 
-  const { available, activeDays, periodLabel } = currentPageInfo;
-  const totalMins  = available.hours * 60 + available.minutes;
-  const isFirst    = detectPayPeriod(activeDays);
-  const budget     = computePeriodBudget(totalMins, isFirst);
-
-  document.getElementById('ready-period').textContent =
-    `Pay period: ${periodLabel}` +
-    (isFirst ? ' (1st half — planning half your monthly hours)' : '');
-  document.getElementById('ready-available').textContent =
-    `Monthly total: ${fmtTime(available.hours, available.minutes)} — Planning ${fmtMins(budget)} this period`;
+  const { activeDays, periodLabel } = currentPageInfo;
+  document.getElementById('ready-period').textContent = `Pay period: ${periodLabel}`;
   document.getElementById('ready-days').textContent =
     `Active days: ${activeDays.length} across ${currentPageInfo.weekCount} week(s)`;
 
@@ -181,30 +169,33 @@ document.addEventListener('DOMContentLoaded', async () => {
 // ── Calculate ────────────────────────────────────────────────────────────────
 
 document.getElementById('btn-calculate').addEventListener('click', async () => {
-  const maxPerWeek = parseInt(document.getElementById('max-per-week').value, 10);
-  if (!maxPerWeek || maxPerWeek < 1) return;
-  if (!currentPageInfo?.activeDays?.length) return;
-  await saveMaxPerWeek(maxPerWeek);
+  const h = parseInt(document.getElementById('max-monthly-h').value, 10) || 0;
+  const m = parseInt(document.getElementById('max-monthly-m').value, 10) || 0;
+  const maxMonthlyMins = h * 60 + m;
+  if (maxMonthlyMins < 1) return;
+  if (currentPageInfo?.status !== 'ok') return;
+  await saveMaxMonthlyMins(maxMonthlyMins);
 
-  const { available, activeDays } = currentPageInfo;
-  const totalMins        = available.hours * 60 + available.minutes;
-  const isFirst          = detectPayPeriod(activeDays);
-  const budget           = computePeriodBudget(totalMins, isFirst);
-  const maxPerWeekMins   = maxPerWeek * 60;
-  const weekCount        = new Set(activeDays.map(d => d.week)).size;
-  const maxPossible      = weekCount * maxPerWeekMins;
+  const { activeDays } = currentPageInfo;
+  const isFirstHalf   = detectPayPeriod(activeDays);
+  const periodBudget  = isFirstHalf
+    ? Math.ceil(maxMonthlyMins / 2)
+    : Math.floor(maxMonthlyMins / 2);
+  const maxWeekMins   = Math.ceil(maxMonthlyMins / 4);
+  const weekCount     = new Set(activeDays.map(d => d.week)).size;
+  const maxPossible   = weekCount * maxWeekMins;
 
   const capWarning = document.getElementById('preview-cap-warning');
-  if (maxPossible < budget) {
+  if (maxPossible < periodBudget) {
     capWarning.textContent =
-      `Warning: weekly cap allows at most ${fmtMins(maxPossible)} this period but ` +
-      `${fmtMins(budget)} is available. ${fmtMins(budget - maxPossible)} will not be scheduled.`;
+      `Warning: ${weekCount} week(s) × ${fmtMins(maxWeekMins)}/week allows at most ${fmtMins(maxPossible)} ` +
+      `but ${fmtMins(periodBudget)} is budgeted. ${fmtMins(periodBudget - maxPossible)} will not be scheduled.`;
     capWarning.style.display = 'block';
   } else {
     capWarning.style.display = 'none';
   }
 
-  currentSchedule = distribute(activeDays, budget, maxPerWeekMins);
+  currentSchedule = distribute(activeDays, periodBudget, maxWeekMins);
 
   const tbody = document.getElementById('preview-table-body');
   tbody.innerHTML = '';
@@ -223,7 +214,7 @@ document.getElementById('btn-calculate').addEventListener('click', async () => {
 
   const scheduledTotal = currentSchedule.reduce((s, d) => s + d.hours * 60 + d.minutes, 0);
   document.getElementById('preview-summary').textContent =
-    `Total scheduled: ${fmtMins(scheduledTotal)}`;
+    `Scheduled: ${fmtMins(scheduledTotal)} of ${fmtMins(periodBudget)} this period`;
 
   showState('preview');
 });
@@ -232,7 +223,7 @@ document.getElementById('btn-calculate').addEventListener('click', async () => {
 
 document.getElementById('btn-back').addEventListener('click', () => showState('ready'));
 
-// ── Fill & Save ──────────────────────────────────────────────────────────────
+// ── Fill ─────────────────────────────────────────────────────────────────────
 
 document.getElementById('btn-fill').addEventListener('click', async () => {
   document.getElementById('btn-fill').disabled = true;
@@ -245,17 +236,10 @@ document.getElementById('btn-fill').addEventListener('click', async () => {
     return;
   }
 
-  const weekNums  = [...new Set(currentSchedule.map(d => d.week))].sort((a, b) => a - b);
-  let savedCount  = 0;
-
-  for (let i = 0; i < weekNums.length; i++) {
-    const result = await sendToContent(currentTab.id, { action: 'saveWorkweek', weekIndex: weekNums[i] });
-    if (result?.ok) savedCount++;
-    if (i < weekNums.length - 1) await delay(400);
-  }
+  await sendToContent(currentTab.id, { action: 'expandAllWeeks' });
 
   document.getElementById('done-message').textContent =
-    `Filled ${currentSchedule.length} day(s) and saved ${savedCount} of ${weekNums.length} workweek(s).`;
+    `Filled ${fillResult.filled} day(s). Review the timesheet, then save and submit manually.`;
   showState('done');
 });
 

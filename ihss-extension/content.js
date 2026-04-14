@@ -3,33 +3,6 @@
 'use strict';
 
 /**
- * Parse the monthly available hours from the display element.
- * Tries "HH:MM" format first, then a plain integer.
- *
- * NOTE: Inspect #available-ts-hours on the live page to confirm the text format.
- * If this returns null, the format doesn't match — update the regex accordingly.
- *
- * @returns {{hours: number, minutes: number}|null}
- */
-function parseAvailableHours() {
-  const el = document.getElementById('available-ts-hours');
-  if (!el) return null;
-  const text = el.textContent.trim();
-
-  // "283:30" format
-  const colonMatch = text.match(/(\d+):(\d+)/);
-  if (colonMatch) {
-    return { hours: parseInt(colonMatch[1], 10), minutes: parseInt(colonMatch[2], 10) };
-  }
-  // Plain integer hours
-  const intMatch = text.match(/^(\d+)$/);
-  if (intMatch) {
-    return { hours: parseInt(intMatch[1], 10), minutes: 0 };
-  }
-  return null;
-}
-
-/**
  * Scan the DOM for all active (in-period) workdays.
  * Iterates timesheet-active-payperiod-{W}-{D} and timesheet-out-of-payperiod-{W}-{D}
  * until neither exists for a given (W, D) pair.
@@ -82,17 +55,23 @@ function buildPeriodLabel(activeDays) {
 
 /**
  * Read page state and return it to the popup.
- * Returns null if the available-hours element is not found (page not ready).
+ * Always returns a non-null object with a `status` field.
+ * On failure, `status` is 'error' and `reason` describes what was missing.
  */
 function getPageInfo() {
-  const available = parseAvailableHours();
-  if (!available) return null;
-
   const activeDays = collectActiveDays();
-  const weekNums   = [...new Set(activeDays.map(d => d.week))];
+  if (!activeDays.length) {
+    const sample = Array.from(document.querySelectorAll('[id]'))
+      .slice(0, 20).map(el => el.id).join(', ');
+    return {
+      status: 'error',
+      reason: `No active workdays found. Make sure a pay period is selected and the page is fully loaded. First 20 IDs on page: ${sample || '(none)'}`,
+    };
+  }
 
+  const weekNums = [...new Set(activeDays.map(d => d.week))];
   return {
-    available,
+    status: 'ok',
     activeDays,
     weekCount:   weekNums.length,
     periodLabel: buildPeriodLabel(activeDays),
@@ -144,6 +123,20 @@ function saveWorkweek(weekIndex) {
   return { ok: true };
 }
 
+/**
+ * Expand all collapsed workweek panels.
+ * Clicks any mat-expansion-panel-header that is currently in a collapsed panel.
+ *
+ * @returns {{expanded: number}}
+ */
+function expandAllWeeks() {
+  const headers = document.querySelectorAll(
+    'mat-expansion-panel:not(.mat-expanded) mat-expansion-panel-header'
+  );
+  headers.forEach(h => h.click());
+  return { expanded: headers.length };
+}
+
 // Message dispatcher
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === 'getPageInfo') {
@@ -152,6 +145,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     sendResponse(fillSchedule(msg.schedule));
   } else if (msg.action === 'saveWorkweek') {
     sendResponse(saveWorkweek(msg.weekIndex));
+  } else if (msg.action === 'expandAllWeeks') {
+    sendResponse(expandAllWeeks());
   } else {
     return false; // not our message
   }
