@@ -115,17 +115,18 @@ function fillSchedule(schedule) {
 
   function setInput(id, value) {
     const el = document.getElementById(id);
-    if (!el) return;
+    if (!el) return false;
     nativeSetter.call(el, String(value));
     el.dispatchEvent(new Event('input',  { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
   }
 
   let filled = 0;
   for (const entry of schedule) {
-    setInput(entry.hoursId,   entry.hours);
-    setInput(entry.minutesId, entry.minutes);
-    filled++;
+    const h = setInput(entry.hoursId,   entry.hours);
+    const m = setInput(entry.minutesId, entry.minutes);
+    if (h && m) filled++;
   }
   return { filled };
 }
@@ -145,8 +146,14 @@ function saveWorkweek(weekIndex) {
 
 // Message dispatcher
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.action === 'getPageInfo')   sendResponse(getPageInfo());
-  if (msg.action === 'fillSchedule')  sendResponse(fillSchedule(msg.schedule));
-  if (msg.action === 'saveWorkweek')  sendResponse(saveWorkweek(msg.weekIndex));
-  return true; // keep message channel open for async responses
+  if (msg.action === 'getPageInfo') {
+    sendResponse(getPageInfo());
+  } else if (msg.action === 'fillSchedule') {
+    sendResponse(fillSchedule(msg.schedule));
+  } else if (msg.action === 'saveWorkweek') {
+    sendResponse(saveWorkweek(msg.weekIndex));
+  } else {
+    return false; // not our message
+  }
+  return false; // synchronous response already sent
 });
