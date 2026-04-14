@@ -4,7 +4,9 @@ const assert = require('assert');
 const { computePeriodBudget, detectPayPeriod, distribute } = require('../ihss-extension/popup.js');
 
 let passed = 0;
+let total = 0;
 function test(name, fn) {
+  total++;
   try {
     fn();
     console.log(`  ✓ ${name}`);
@@ -61,6 +63,9 @@ test('exactly day 15 → first half', () => {
 });
 test('exactly day 16 → second half', () => {
   assert.strictEqual(detectPayPeriod([makeDay(0, 0, 16)]), false);
+});
+test('empty activeDays throws', () => {
+  assert.throws(() => detectPayPeriod([]), /no active days/);
 });
 
 // ── distribute ───────────────────────────────────────────────────────────────
@@ -145,4 +150,27 @@ test('budget under 1h: last day gets only minutes', () => {
   assert.strictEqual(totalMins(s), 90);
 });
 
-console.log(`\n${passed} tests passed`);
+test('days delivered out of order: minute remainder still lands on highest dayIdx', () => {
+  // Days deliberately out of dayIdx order
+  const days = [
+    makeDay(0, 4, 5),
+    makeDay(0, 0, 1),
+    makeDay(0, 2, 3),
+  ];
+  const s = distribute(days, 190, 2400); // 3h10m = 190 min
+  // weekHours=3, weekMins=10, hoursPerDay=1, extraHours=0
+  // After sort: dayIdx 0, 2, 4 → all get 1h, last (dayIdx 4) gets 10m
+  const byDayIdx = Object.fromEntries(s.map(d => [d.dayIdx, d]));
+  assert.strictEqual(byDayIdx[0].hours, 1);
+  assert.strictEqual(byDayIdx[0].minutes, 0);
+  assert.strictEqual(byDayIdx[2].hours, 1);
+  assert.strictEqual(byDayIdx[2].minutes, 0);
+  assert.strictEqual(byDayIdx[4].hours, 1);
+  assert.strictEqual(byDayIdx[4].minutes, 10, 'last dayIdx gets minute remainder');
+  assert.strictEqual(totalMins(s), 190);
+});
+
+const failed = total - passed;
+console.log(failed > 0
+  ? `\n${passed} passed, ${failed} failed`
+  : `\n${passed} tests passed`);

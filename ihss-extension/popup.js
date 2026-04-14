@@ -25,6 +25,7 @@ function computePeriodBudget(totalMinutes, isFirstHalf) {
  * @returns {boolean}
  */
 function detectPayPeriod(activeDays) {
+  if (activeDays.length === 0) throw new Error('detectPayPeriod: no active days');
   const dayNums = activeDays.map(d => {
     const m = d.dateText.match(/(\d+),\s*\d{4}/);
     return m ? parseInt(m[1], 10) : 0;
@@ -51,6 +52,10 @@ function distribute(activeDays, periodBudget, maxPerWeekMinutes) {
   for (const day of activeDays) {
     if (!weekMap.has(day.week)) weekMap.set(day.week, []);
     weekMap.get(day.week).push(day);
+  }
+  // Sort days within each week by dayIdx so minute remainder always lands on the last day
+  for (const [, days] of weekMap) {
+    days.sort((a, b) => a.dayIdx - b.dayIdx);
   }
   const weekKeys = Array.from(weekMap.keys()).sort((a, b) => a - b);
 
