@@ -167,6 +167,64 @@ test('budget split: 250h13m → first half 125h, second half 125h13m, both sum t
   assert.strictEqual(totalMins(s1) + totalMins(s2), maxMonthlyMins, 'both halves sum to monthly total');
 });
 
+// ── distribute — February ─────────────────────────────────────────────────────
+console.log('distribute (February)');
+
+test('February 2026: 15013 min / 28 days → 5 days at 537min (8:57), 23 days at 536min (8:56)', () => {
+  // dailyBase = floor(15013/28) = 536, higherCount = 15013 % 28 = 5
+  // Round-robin across 4 calendar weeks (w0=Feb1-7, w1=Feb8-14, w2=Feb15-21, w3=Feb22-28):
+  // pass0: w0d0(Feb1), w1d0(Feb8), w2d0(Feb15), w3d0(Feb22) → 4 assigned
+  // pass1: w0d1(Feb2)                                         → 5 assigned
+  // Higher days: Feb 1,2,8,15,22
+  const firstHalf = [];
+  for (let calDay = 1; calDay <= 15; calDay++)
+    firstHalf.push(makeDay(Math.floor((calDay - 1) / 7), (calDay - 1) % 7, calDay, 'Feb', 2026));
+  const secondHalf = [];
+  for (let calDay = 16; calDay <= 28; calDay++)
+    secondHalf.push(makeDay(Math.floor((calDay - 1) / 7), (calDay - 1) % 7, calDay, 'Feb', 2026));
+
+  const s1 = distribute(firstHalf,  0, 15013);
+  const s2 = distribute(secondHalf, 0, 15013);
+  const all = [...s1, ...s2];
+
+  assert.strictEqual(all.length, 28, '28 days total');
+  const higher = all.filter(d => d.hours * 60 + d.minutes === 537);
+  const base   = all.filter(d => d.hours * 60 + d.minutes === 536);
+  assert.strictEqual(higher.length, 5,  '5 days at 537 minutes');
+  assert.strictEqual(base.length,   23, '23 days at 536 minutes');
+  assert.strictEqual(totalMins(s1) + totalMins(s2), 15013, 'both halves sum to monthly total');
+});
+
+test('February: every day has hours >= 0 and minutes in [0, 59]', () => {
+  const firstHalf = [];
+  for (let calDay = 1; calDay <= 15; calDay++)
+    firstHalf.push(makeDay(Math.floor((calDay - 1) / 7), (calDay - 1) % 7, calDay, 'Feb', 2026));
+  const s = distribute(firstHalf, 0, 15013);
+  s.forEach(d => {
+    assert.ok(d.hours   >= 0,  `hours non-negative for calDay ~${d.dayIdx + 1}`);
+    assert.ok(d.minutes >= 0 && d.minutes < 60, `minutes in [0,59] for calDay ~${d.dayIdx + 1}`);
+  });
+});
+
+test('February leap year 2028: 29-day distribution sums to monthly total', () => {
+  // isLeapYear(2028) = true → febDays = 29
+  const firstHalf = [];
+  for (let calDay = 1; calDay <= 15; calDay++)
+    firstHalf.push(makeDay(Math.floor((calDay - 1) / 7), (calDay - 1) % 7, calDay, 'Feb', 2028));
+  const secondHalf = [];
+  for (let calDay = 16; calDay <= 29; calDay++)  // 29 days in leap Feb
+    secondHalf.push(makeDay(Math.floor((calDay - 1) / 7), (calDay - 1) % 7, calDay, 'Feb', 2028));
+
+  const s1 = distribute(firstHalf,  0, 15000);
+  const s2 = distribute(secondHalf, 0, 15000);
+
+  assert.strictEqual(s1.length + s2.length, 29, '29 days covered');
+  assert.strictEqual(totalMins(s1) + totalMins(s2), 15000, 'both halves sum to monthly total');
+  [...s1, ...s2].forEach(d => {
+    assert.ok(d.minutes >= 0 && d.minutes < 60, `minutes in range for calDay ~${d.dayIdx + 1}`);
+  });
+});
+
 const failed = total - passed;
 console.log(failed > 0
   ? `\n${passed} passed, ${failed} failed`

@@ -73,7 +73,45 @@ function distributeNormal(activeDays, periodBudget) {
 }
 
 function distributeFebruary(activeDays, maxMonthlyMins) {
-  throw new Error('distributeFebruary not yet implemented');
+  const yearMatch = activeDays[0].dateText.match(/(\d{4})/);
+  const year      = yearMatch ? parseInt(yearMatch[1], 10) : new Date().getFullYear();
+  const febDays   = isLeapYear(year) ? 29 : 28;
+  const dailyBase   = Math.floor(maxMonthlyMins / febDays);
+  const higherCount = maxMonthlyMins % febDays;
+
+  // Build full-month structure. Calendar weeks: days 1-7=wk0, 8-14=wk1, 15-21=wk2, 22-28=wk3, (29=wk4)
+  const weekBuckets = new Map();
+  for (let calDay = 1; calDay <= febDays; calDay++) {
+    const wk = Math.floor((calDay - 1) / 7);
+    if (!weekBuckets.has(wk)) weekBuckets.set(wk, []);
+    weekBuckets.get(wk).push({ calDay, mins: dailyBase });
+  }
+  const weekKeys = Array.from(weekBuckets.keys()).sort((a, b) => a - b);
+
+  // Assign higher-minute slots round-robin (first day of each week first)
+  let assigned = 0;
+  let pass = 0;
+  while (assigned < higherCount) {
+    for (const wk of weekKeys) {
+      if (assigned >= higherCount) break;
+      const slots = weekBuckets.get(wk);
+      if (pass < slots.length) { slots[pass].mins++; assigned++; }
+    }
+    pass++;
+  }
+
+  // Build calDay → assigned-minutes lookup
+  const calDayToMins = new Map();
+  for (const slots of weekBuckets.values())
+    for (const { calDay, mins } of slots)
+      calDayToMins.set(calDay, mins);
+
+  return activeDays.map(day => {
+    const m      = day.dateText.match(/(\d+),\s*\d{4}/);
+    const calDay = m ? parseInt(m[1], 10) : 1;
+    const mins   = calDayToMins.get(calDay) ?? dailyBase;
+    return { ...day, hours: Math.floor(mins / 60), minutes: mins % 60 };
+  });
 }
 
 function distribute(activeDays, periodBudget, maxMonthlyMins) {
