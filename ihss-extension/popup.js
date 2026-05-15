@@ -29,60 +29,56 @@ function isLeapYear(year) {
   return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
-/**
- * Distribute periodBudget minutes across activeDays, respecting maxWeekMinutes.
- *
- * Behavior:
- * - Greedy by week: earlier weeks fill to cap before later weeks receive anything
- * - Within each week: every day gets the same whole number of hours (0 minutes)
- * - The very last active day of the period carries all remaining minutes from
- *   floor-division remainders across all weeks — only one day ever has a
- *   fractional hour
- *
- * @param {Array<{week:number, dayIdx:number, dateText:string, hoursId:string, minutesId:string}>} activeDays
- * @param {number} periodBudget     Total minutes to schedule this period
- * @param {number} maxWeekMinutes   Weekly cap in minutes
- * @returns {Array<{week, dayIdx, dateText, hoursId, minutesId, hours, minutes}>}
- */
-function distribute(activeDays, periodBudget, maxWeekMinutes) {
+function distributeNormal(activeDays, periodBudget) {
   const weekMap = new Map();
   for (const day of activeDays) {
     if (!weekMap.has(day.week)) weekMap.set(day.week, []);
     weekMap.get(day.week).push(day);
   }
-  for (const [, days] of weekMap) {
-    days.sort((a, b) => a.dayIdx - b.dayIdx);
-  }
+  for (const [, days] of weekMap) days.sort((a, b) => a.dayIdx - b.dayIdx);
   const weekKeys = Array.from(weekMap.keys()).sort((a, b) => a - b);
 
-  let remaining    = periodBudget;
-  let deferredMins = 0; // sub-hour minute remainders, collected across all weeks
-  const schedule   = [];
+  const periodDays   = activeDays.length;
+  const periodHours  = Math.floor(periodBudget / 60);
+  const leftoverMins = periodBudget % 60;
+  const baseHours    = Math.floor(periodHours / periodDays);
+  const extraCount   = periodHours % periodDays;
 
-  for (const weekKey of weekKeys) {
-    const days       = weekMap.get(weekKey);
-    const weekBudget = Math.min(remaining, maxWeekMinutes);
-    remaining       -= weekBudget;
-
-    const weekHours  = Math.floor(weekBudget / 60);
-    deferredMins    += weekBudget % 60; // fractional minutes deferred to last day
-
-    const hoursPerDay = Math.floor(weekHours / days.length);
-    const extraHours  = weekHours % days.length; // distribute to first days
-
-    days.forEach((day, i) => {
-      schedule.push({ ...day, hours: hoursPerDay + (i < extraHours ? 1 : 0), minutes: 0 });
-    });
+  // Extra-hour slots: first day of each week, round-robin until extraCount is met
+  const extraSet = new Set();
+  let assigned = 0;
+  let pass = 0;
+  while (assigned < extraCount) {
+    for (const wk of weekKeys) {
+      if (assigned >= extraCount) break;
+      const days = weekMap.get(wk);
+      if (pass < days.length) { extraSet.add(days[pass]); assigned++; }
+    }
+    pass++;
   }
 
-  // Sub-hour minutes accumulated across all weeks go to the last active day
-  if (schedule.length > 0) {
-    const last = schedule[schedule.length - 1];
-    last.hours   += Math.floor(deferredMins / 60);
-    last.minutes  = deferredMins % 60;
-  }
+  const firstDay = weekMap.get(weekKeys[0])[0];
 
+  const schedule = [];
+  for (const wk of weekKeys) {
+    for (const day of weekMap.get(wk)) {
+      schedule.push({
+        ...day,
+        hours:   baseHours + (extraSet.has(day) ? 1 : 0),
+        minutes: day === firstDay ? leftoverMins : 0,
+      });
+    }
+  }
   return schedule;
+}
+
+function distributeFebruary(activeDays, maxMonthlyMins) {
+  throw new Error('distributeFebruary not yet implemented');
+}
+
+function distribute(activeDays, periodBudget, maxMonthlyMins) {
+  if (detectFebruary(activeDays)) return distributeFebruary(activeDays, maxMonthlyMins);
+  return distributeNormal(activeDays, periodBudget);
 }
 
 if (typeof module !== 'undefined') {

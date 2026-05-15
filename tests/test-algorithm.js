@@ -67,149 +67,104 @@ test('1900 is not a leap year (century not divisible by 400)', () => {
   assert.strictEqual(isLeapYear(1900), false);
 });
 
-// ── distribute ───────────────────────────────────────────────────────────────
-console.log('distribute');
+// ── distribute — normal months ────────────────────────────────────────────────
+console.log('distribute (normal months)');
 
-test('10h across 3 days (single week): first day gets extra hour', () => {
-  const days = [makeDay(0, 0, 1), makeDay(0, 1, 2), makeDay(0, 2, 3)];
-  const s = distribute(days, 600, 2400); // 10h = 600 min; weekHours=10, hoursPerDay=3, extraHours=1
-  assert.strictEqual(s[0].hours, 4, 'day 0 gets extra hour');
-  assert.strictEqual(s[1].hours, 3, 'day 1');
-  assert.strictEqual(s[2].hours, 3, 'day 2');
-  assert.strictEqual(s[0].minutes, 0);
-  assert.strictEqual(s[2].minutes, 0); // no deferred mins (600 % 60 = 0)
-  assert.strictEqual(totalMins(s), 600);
-});
-
-test('39h30m across 5 days (single week): first 4 get 8h, last gets 7h30m', () => {
-  const days = Array.from({ length: 5 }, (_, i) => makeDay(0, i, i + 1));
-  const s = distribute(days, 2370, 2400); // 39h30m = 2370 min; weekHours=39, hoursPerDay=7, extraHours=4
-  assert.strictEqual(s[0].hours, 8, 'day 0 (extra hour)');
-  assert.strictEqual(s[1].hours, 8, 'day 1 (extra hour)');
-  assert.strictEqual(s[2].hours, 8, 'day 2 (extra hour)');
-  assert.strictEqual(s[3].hours, 8, 'day 3 (extra hour)');
-  assert.strictEqual(s[4].hours, 7, 'last day base hours');
-  assert.strictEqual(s[4].minutes, 30, 'last day carries deferred 30m (2370 % 60)');
-  assert.strictEqual(s[0].minutes, 0, 'day 0 no minutes');
-  assert.strictEqual(totalMins(s), 2370);
-});
-
-test('evenly divisible: every day same whole hours, no minutes', () => {
-  const days = Array.from({ length: 5 }, (_, i) => makeDay(0, i, i + 1));
-  const s = distribute(days, 2400, 2400); // 40h exact; hoursPerDay = 8
-  s.forEach((d, i) => {
-    assert.strictEqual(d.hours, 8, `day ${i}`);
-    assert.strictEqual(d.minutes, 0, `day ${i} minutes`);
-  });
-  assert.strictEqual(totalMins(s), 2400);
-});
-
-test('multi-week: cap divides cleanly, every day gets equal hours', () => {
+test('125h/15 days: 10 days at 8h and 5 days at 9h, extra hours spread across weeks', () => {
+  // 3 weeks × 5 days; baseHours=8, extraCount=5
+  // Round-robin pass 0: w0d0, w1d0, w2d0 (3 assigned)
+  // Round-robin pass 1: w0d1, w1d1              (5 assigned)
+  // → week0: 2 extras, week1: 2 extras, week2: 1 extra
   const days = [];
   for (let w = 0; w < 3; w++)
     for (let d = 0; d < 5; d++)
       days.push(makeDay(w, d, w * 7 + d + 1));
-  const s = distribute(days, 7200, 2400); // 120h total, 40h cap — 8h/day exactly
-  s.forEach((d, i) => {
-    assert.strictEqual(d.hours, 8, `entry ${i} hours`);
-    assert.strictEqual(d.minutes, 0, `entry ${i} minutes`);
-  });
-  assert.strictEqual(totalMins(s), 7200);
+  const s = distribute(days, 7500, 15000);
+  assert.strictEqual(s.filter(d => d.hours === 9).length, 5,  '5 days at 9h');
+  assert.strictEqual(s.filter(d => d.hours === 8).length, 10, '10 days at 8h');
+  assert.strictEqual(s.filter(d => d.week === 0 && d.hours === 9).length, 2, 'week0 gets 2 extra-hour days');
+  assert.strictEqual(s.filter(d => d.week === 1 && d.hours === 9).length, 2, 'week1 gets 2 extra-hour days');
+  assert.strictEqual(s.filter(d => d.week === 2 && d.hours === 9).length, 1, 'week2 gets 1 extra-hour day');
+  s.forEach(d => assert.strictEqual(d.minutes, 0, `day w${d.week}d${d.dayIdx} should have 0 minutes`));
+  assert.strictEqual(totalMins(s), 7500);
 });
 
-test('week with more days than whole hours: extra hours on first days, minutes deferred', () => {
-  // 5h11m (311 min) across 7 days: weekHours=5, hoursPerDay=0, extraHours=5
-  // First 5 days get 1h, last 2 get 0h; 11m deferred to last day of period
-  const days = Array.from({ length: 7 }, (_, i) => makeDay(0, i, i + 5));
-  const s = distribute(days, 311, 2400);
-  for (let i = 0; i < 5; i++) assert.strictEqual(s[i].hours, 1, `day ${i}`);
-  assert.strictEqual(s[5].hours, 0, 'day 5');
-  assert.strictEqual(s[6].hours, 0, 'day 6 base hours');
-  assert.strictEqual(s[6].minutes, 11, 'day 6 gets deferred 11m (311 % 60)');
-  assert.strictEqual(totalMins(s), 311);
+test('leftover minutes go to the first active day (lowest week, lowest dayIdx)', () => {
+  // 125h13m = 7513 min; leftoverMins = 13; first day = week0 dayIdx0
+  const days = [];
+  for (let w = 0; w < 3; w++)
+    for (let d = 0; d < 5; d++)
+      days.push(makeDay(w, d, w * 7 + d + 16));
+  const s = distribute(days, 7513, 15013);
+  const firstDay = s.find(d => d.week === 0 && d.dayIdx === 0);
+  assert.strictEqual(firstDay.minutes, 13, 'first day gets 13 leftover minutes');
+  s.filter(d => !(d.week === 0 && d.dayIdx === 0))
+   .forEach(d => assert.strictEqual(d.minutes, 0, `day w${d.week}d${d.dayIdx} should have 0 minutes`));
+  assert.strictEqual(totalMins(s), 7513);
 });
 
-test('cap enforced: week 0 fills to cap, week 1 gets remainder, last day has minutes', () => {
-  // 2 weeks × 5 days, 50h20m = 3020 min, cap = 30h = 1800 min
+test('first half (whole hours): no day has minutes', () => {
+  const days = [];
+  for (let w = 0; w < 3; w++)
+    for (let d = 0; d < 5; d++)
+      days.push(makeDay(w, d, w * 7 + d + 1));
+  const s = distribute(days, 7500, 15000);
+  s.forEach(d => assert.strictEqual(d.minutes, 0, `day w${d.week}d${d.dayIdx} should have 0 minutes`));
+});
+
+test('total minutes scheduled exactly equals period budget', () => {
   const days = [];
   for (let w = 0; w < 2; w++)
     for (let d = 0; d < 5; d++)
       days.push(makeDay(w, d, w * 7 + d + 1));
-  const s = distribute(days, 3020, 1800);
-  // Week 0: budget=1800, hoursPerDay=floor(30/5)=6 → all 5 days get 6h
-  // Week 1: budget=1220, hoursPerDay=floor(20/5)=4 → all 5 days get 4h
-  // totalScheduled=5×360+5×240=1800+1200=3000, leftover=20 → last day gets 4h20m
-  const week0 = s.filter(d => d.week === 0);
-  const week1 = s.filter(d => d.week === 1);
-  week0.forEach((d, i) => assert.strictEqual(d.hours, 6, `w0 day ${i}`));
-  week0.forEach((d, i) => assert.strictEqual(d.minutes, 0, `w0 day ${i} minutes`));
-  week1.slice(0, 4).forEach((d, i) => assert.strictEqual(d.hours, 4, `w1 day ${i}`));
-  week1.slice(0, 4).forEach((d, i) => assert.strictEqual(d.minutes, 0, `w1 day ${i} minutes`));
-  assert.strictEqual(week1[4].hours, 4, 'last day hours');
-  assert.strictEqual(week1[4].minutes, 20, 'last day carries all remaining minutes');
-  assert.strictEqual(totalMins(s), 3020);
-});
-
-test('odd monthly minutes: both periods sum to exactly monthly total', () => {
-  // 20h43m = 1243 min. First half gets ceil, second gets floor — sum = 1243 exactly.
-  const maxMonthly  = 1243;
-  const maxWeekMins = Math.ceil(maxMonthly / 4); // 311
-
-  // First half: days 1–14 (2 weeks × 7 days)
-  const firstDays = [];
-  for (let w = 0; w < 2; w++)
-    for (let d = 0; d < 7; d++)
-      firstDays.push(makeDay(w, d, w * 7 + d + 1));
-  assert.strictEqual(detectPayPeriod(firstDays), true, 'detected as first half');
-  const budget1 = Math.ceil(maxMonthly / 2);  // 622
-  const s1 = distribute(firstDays, budget1, maxWeekMins);
-  assert.strictEqual(totalMins(s1), budget1, 'first half consumes exactly ceil(M/2)');
-
-  // Second half: days 16–28 (2 weeks × 7 days)
-  const secondDays = [];
-  for (let w = 0; w < 2; w++)
-    for (let d = 0; d < 7; d++)
-      secondDays.push(makeDay(w, d, w * 7 + d + 16));
-  assert.strictEqual(detectPayPeriod(secondDays), false, 'detected as second half');
-  const budget2 = Math.floor(maxMonthly / 2); // 621
-  const s2 = distribute(secondDays, budget2, maxWeekMins);
-  assert.strictEqual(totalMins(s2), budget2, 'second half consumes exactly floor(M/2)');
-
-  assert.strictEqual(budget1 + budget2, maxMonthly, 'both periods sum to monthly total');
+  const s = distribute(days, 5747, 11000);
+  assert.strictEqual(totalMins(s), 5747);
 });
 
 test('single active day: gets all budget', () => {
-  const s = distribute([makeDay(0, 0, 1)], 300, 600); // 5h budget
+  const s = distribute([makeDay(0, 0, 1)], 300, 600);
   assert.strictEqual(s[0].hours, 5);
   assert.strictEqual(s[0].minutes, 0);
   assert.strictEqual(totalMins(s), 300);
 });
 
-test('budget under 1 hour per day: extra hour on first day, deferred mins on last', () => {
-  const days = [makeDay(0, 0, 1), makeDay(0, 1, 2)];
-  const s = distribute(days, 90, 2400); // 1h30m; weekHours=1, hoursPerDay=0, extraHours=1
-  assert.strictEqual(s[0].hours, 1, 'day 0 gets the extra hour');
-  assert.strictEqual(s[0].minutes, 0);
-  assert.strictEqual(s[1].hours, 0, 'last day base hours');
-  assert.strictEqual(s[1].minutes, 30, 'last day gets deferred 30m (90 % 60)');
-  assert.strictEqual(totalMins(s), 90);
+test('days delivered out of order: sorted correctly, first sorted day gets leftover minutes', () => {
+  // days delivered in shuffled order; after sorting by dayIdx: [dayIdx0, dayIdx2, dayIdx4]
+  // 3h10m = 190 min; baseHours = floor(3/3) = 1, extraCount = 0
+  // firstDay = dayIdx0 → gets leftoverMins=10
+  const days = [makeDay(0, 4, 5), makeDay(0, 0, 1), makeDay(0, 2, 3)];
+  const s = distribute(days, 190, 400);
+  const byDayIdx = Object.fromEntries(s.map(d => [d.dayIdx, d]));
+  assert.strictEqual(byDayIdx[0].hours,   1);
+  assert.strictEqual(byDayIdx[0].minutes, 10, 'dayIdx=0 (first sorted) gets leftover 10m');
+  assert.strictEqual(byDayIdx[2].hours,   1);
+  assert.strictEqual(byDayIdx[2].minutes, 0);
+  assert.strictEqual(byDayIdx[4].hours,   1);
+  assert.strictEqual(byDayIdx[4].minutes, 0);
+  assert.strictEqual(totalMins(s), 190);
 });
 
-test('days delivered out of order: last chronological day gets all remaining time', () => {
-  const days = [
-    makeDay(0, 4, 5),
-    makeDay(0, 0, 1),
-    makeDay(0, 2, 3),
-  ];
-  const s = distribute(days, 190, 2400); // 3h10m = 190 min; hoursPerDay = floor(3/3) = 1
-  const byDayIdx = Object.fromEntries(s.map(d => [d.dayIdx, d]));
-  assert.strictEqual(byDayIdx[0].hours, 1);
-  assert.strictEqual(byDayIdx[0].minutes, 0);
-  assert.strictEqual(byDayIdx[2].hours, 1);
-  assert.strictEqual(byDayIdx[2].minutes, 0);
-  assert.strictEqual(byDayIdx[4].hours, 1, 'last day hours');
-  assert.strictEqual(byDayIdx[4].minutes, 10, 'last day gets minute remainder');
-  assert.strictEqual(totalMins(s), 190);
+test('budget split: 250h13m → first half 125h, second half 125h13m, both sum to total', () => {
+  const maxMonthlyMins = 15013;
+  const totalHours     = Math.floor(maxMonthlyMins / 60); // 250
+  const firstHalfMins  = Math.floor(totalHours / 2) * 60; // 7500
+  const secondHalfMins = maxMonthlyMins - firstHalfMins;   // 7513
+
+  const firstDays = [];
+  for (let w = 0; w < 3; w++)
+    for (let d = 0; d < 5; d++)
+      firstDays.push(makeDay(w, d, w * 7 + d + 1));
+  const secondDays = [];
+  for (let w = 0; w < 3; w++)
+    for (let d = 0; d < 5; d++)
+      secondDays.push(makeDay(w, d, w * 7 + d + 16));
+
+  const s1 = distribute(firstDays,  firstHalfMins,  maxMonthlyMins);
+  const s2 = distribute(secondDays, secondHalfMins, maxMonthlyMins);
+
+  assert.strictEqual(totalMins(s1), firstHalfMins,  'first half total matches');
+  assert.strictEqual(totalMins(s2), secondHalfMins, 'second half total matches');
+  assert.strictEqual(totalMins(s1) + totalMins(s2), maxMonthlyMins, 'both halves sum to monthly total');
 });
 
 const failed = total - passed;
