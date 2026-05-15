@@ -19,6 +19,16 @@ function detectPayPeriod(activeDays) {
   return Math.max(...dayNums) <= 15;
 }
 
+function detectFebruary(activeDays) {
+  if (activeDays.length === 0) return false;
+  const m = activeDays[0].dateText.match(/Hours for (\w+)/i);
+  return m ? m[1].toLowerCase().startsWith('feb') : false;
+}
+
+function isLeapYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
 /**
  * Distribute periodBudget minutes across activeDays, respecting maxWeekMinutes.
  *
@@ -76,7 +86,7 @@ function distribute(activeDays, periodBudget, maxWeekMinutes) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { detectPayPeriod, distribute };
+  module.exports = { detectPayPeriod, detectFebruary, distribute, isLeapYear };
 }
 
 // ── Browser UI (not executed in Node.js) ─────────────────────────────────────

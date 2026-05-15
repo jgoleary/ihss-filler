@@ -1,7 +1,7 @@
 // Run with: node tests/test-algorithm.js
 'use strict';
 const assert = require('assert');
-const { detectPayPeriod, distribute } = require('../ihss-extension/popup.js');
+const { detectPayPeriod, detectFebruary, distribute, isLeapYear } = require('../ihss-extension/popup.js');
 
 let passed = 0;
 let total = 0;
@@ -30,6 +30,42 @@ function makeDay(week, dayIdx, dayNum, month = 'Apr', year = 2026) {
 
 // Helper: sum total minutes across a schedule
 const totalMins = s => s.reduce((sum, d) => sum + d.hours * 60 + d.minutes, 0);
+
+// ── detectFebruary ────────────────────────────────────────────────────────────
+console.log('detectFebruary');
+
+test('returns true when first day is in February', () => {
+  const days = [makeDay(0, 0, 1, 'Feb')];
+  assert.strictEqual(detectFebruary(days), true);
+});
+
+test('returns false when month is not February', () => {
+  const days = [makeDay(0, 0, 1, 'Apr')];
+  assert.strictEqual(detectFebruary(days), false);
+});
+
+test('returns false for empty array', () => {
+  assert.strictEqual(detectFebruary([]), false);
+});
+
+// ── isLeapYear ────────────────────────────────────────────────────────────────
+console.log('isLeapYear');
+
+test('2024 is a leap year', () => {
+  assert.strictEqual(isLeapYear(2024), true);
+});
+
+test('2026 is not a leap year', () => {
+  assert.strictEqual(isLeapYear(2026), false);
+});
+
+test('2000 is a leap year (century divisible by 400)', () => {
+  assert.strictEqual(isLeapYear(2000), true);
+});
+
+test('1900 is not a leap year (century not divisible by 400)', () => {
+  assert.strictEqual(isLeapYear(1900), false);
+});
 
 // ── distribute ───────────────────────────────────────────────────────────────
 console.log('distribute');
