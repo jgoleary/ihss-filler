@@ -63,6 +63,8 @@ The extension icon will now appear in your toolbar for easy access.
 
 ## How to use it
 
+![The IHSS Timesheet Filler popup open over the IHSS timesheet page, showing the pay period, active day count, and monthly hours input](docs/screenshot-popup.png)
+
 ### Before you start
 
 Make sure you know your **total authorized monthly hours** (hours and minutes). You can find this in your IHSS Notice of Action letter or by calling your county.
