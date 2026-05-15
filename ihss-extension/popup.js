@@ -222,24 +222,29 @@ document.getElementById('btn-calculate').addEventListener('click', async () => {
 
   const { activeDays } = currentPageInfo;
   const isFirstHalf   = detectPayPeriod(activeDays);
-  const periodBudget  = isFirstHalf
-    ? Math.ceil(maxMonthlyMins / 2)
-    : Math.floor(maxMonthlyMins / 2);
+  const totalHours    = Math.floor(maxMonthlyMins / 60);
+  const firstHalfMins = Math.floor(totalHours / 2) * 60;
+  const periodBudget  = isFirstHalf ? firstHalfMins : maxMonthlyMins - firstHalfMins;
   const maxWeekMins   = Math.ceil(maxMonthlyMins / 4);
-  const weekCount     = new Set(activeDays.map(d => d.week)).size;
-  const maxPossible   = weekCount * maxWeekMins;
+
+  currentSchedule = distribute(activeDays, periodBudget, maxMonthlyMins);
+
+  const weekTotals = new Map();
+  for (const entry of currentSchedule) {
+    weekTotals.set(entry.week, (weekTotals.get(entry.week) ?? 0) + entry.hours * 60 + entry.minutes);
+  }
+  const overWeeks = [...weekTotals.entries()]
+    .filter(([, mins]) => mins > maxWeekMins)
+    .map(([w]) => w + 1);
 
   const capWarning = document.getElementById('preview-cap-warning');
-  if (maxPossible < periodBudget) {
+  if (overWeeks.length > 0) {
     capWarning.textContent =
-      `Warning: ${weekCount} week(s) × ${fmtMins(maxWeekMins)}/week allows at most ${fmtMins(maxPossible)} ` +
-      `but ${fmtMins(periodBudget)} is budgeted. ${fmtMins(periodBudget - maxPossible)} will not be scheduled.`;
+      `Warning: week(s) ${overWeeks.join(', ')} exceed the ${fmtMins(maxWeekMins)}/week cap.`;
     capWarning.style.display = 'block';
   } else {
     capWarning.style.display = 'none';
   }
-
-  currentSchedule = distribute(activeDays, periodBudget, maxWeekMins);
 
   const tbody = document.getElementById('preview-table-body');
   tbody.innerHTML = '';
